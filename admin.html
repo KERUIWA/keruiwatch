@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#090909">
+<title>Keruiwatch Admin</title>
+<style>
+:root{color-scheme:dark;--red:#e50914;--bg:#090909;--panel:#171717;--muted:#aaa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff;font:15px Arial,Helvetica,sans-serif}.top{padding:22px 5%;border-bottom:1px solid #292929;display:flex;align-items:center;justify-content:space-between}.brand{font-size:24px;font-weight:900;letter-spacing:-1px;color:var(--red);text-decoration:none}.top small{color:#aaa}.wrap{max-width:900px;margin:38px auto;padding:0 20px}.panel{background:var(--panel);border:1px solid #303030;border-radius:10px;padding:24px;margin:18px 0}.panel h1,.panel h2{margin-top:0}.muted{color:var(--muted);line-height:1.6}.field{display:grid;gap:7px;margin:14px 0}.field label{font-size:13px;color:#ccc}.field input,.field textarea,.field select{width:100%;padding:12px;background:#0d0d0d;border:1px solid #444;border-radius:5px;color:#fff;font:inherit}.field textarea{min-height:90px;resize:vertical}.btn{border:0;border-radius:5px;background:var(--red);color:#fff;font-weight:bold;padding:12px 18px;cursor:pointer}.btn.secondary{background:#444}.btn.danger{background:#70252a;padding:8px 12px}.btn:disabled{opacity:.5;cursor:wait}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.status{margin-top:12px;font-size:13px;color:#bbb;min-height:18px}.status.error{color:#ff7777}.status.ok{color:#78d69a}.item{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:14px 0;border-top:1px solid #333}.item strong{display:block}.item small{display:block;color:#aaa;margin-top:5px}.hidden{display:none!important}.tag{font-size:11px;color:#aaa;border:1px solid #444;padding:4px 7px;border-radius:4px}@media(max-width:600px){.panel{padding:18px}.item{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<header class="top"><a class="brand" href="/">KERUIWATCH</a><small>PRIVATE ADMIN</small></header>
+<main class="wrap">
+<section class="panel" id="loginPanel">
+<h1>Administrator access</h1>
+<p class="muted">Enter your private admin token to manage the Keruiwatch catalog. This page does not save the token after you leave or refresh it.</p>
+<div class="field"><label for="token">Admin token</label><input id="token" type="password" autocomplete="current-password" placeholder="Paste your Cloudflare secret"></div>
+<div class="row"><button class="btn" id="connect">Connect</button><span class="tag">Admin only</span></div>
+<div class="status" id="loginStatus" role="status"></div>
+</section>
+<section class="panel hidden" id="dashboard">
+<div class="row" style="justify-content:space-between"><div><h1>Content library</h1><p class="muted">Add a movie or series to the public Keruiwatch catalog.</p></div><button class="btn secondary" id="logout">Disconnect</button></div>
+<form id="addForm">
+<div class="field"><label for="title">Title *</label><input id="title" required maxlength="160" placeholder="e.g. My First Film"></div>
+<div class="field"><label for="type">Content type *</label><select id="type"><option value="movie">Movie</option><option value="series">Series</option></select></div>
+<div class="field"><label for="description">Description</label><textarea id="description" maxlength="2000" placeholder="A short description"></textarea></div>
+<div class="field"><label for="genre">Genre</label><input id="genre" maxlength="100" placeholder="Animation, Drama, Documentary..."></div>
+<div class="field"><label for="poster">Poster image URL</label><input id="poster" type="url" placeholder="https://..."></div>
+<div class="field"><label for="video">Video URL or embed URL</label><input id="video" type="url" placeholder="https://..."></div>
+<div class="field"><label><input id="featured" type="checkbox"> Feature on homepage (catalog flag)</label></div>
+<button class="btn" id="addButton" type="submit">Add to catalog</button>
+<div class="status" id="formStatus" role="status"></div>
+</form>
+</section>
+<section class="panel hidden" id="catalogPanel"><h2>Current catalog</h2><div id="catalog"><p class="muted">Loading titles...</p></div><div class="status" id="catalogStatus" role="status"></div></section>
+</main>
+<script>
+const API="https://keruiwatch-api.liejonathan02.workers.dev";
+let adminToken="";
+const $=id=>document.getElementById(id);
+function status(id,message,type=""){const el=$(id);el.textContent=message;el.className="status "+type}
+async function loadCatalog(){
+ $("catalog").innerHTML='<p class="muted">Loading titles...</p>';
+ try{
+  const response=await fetch(API+"/api/titles");
+  if(!response.ok)throw new Error("Could not load catalog ("+response.status+")");
+  const titles=await response.json();
+  $("catalog").replaceChildren();
+  if(!titles.length){$("catalog").innerHTML='<p class="muted">Your catalog is empty. Add your first title above.</p>';return}
+  titles.forEach(item=>{
+   const row=document.createElement("div");row.className="item";
+   const info=document.createElement("div");
+   const name=document.createElement("strong");name.textContent=item.title;
+   const meta=document.createElement("small");meta.textContent=(item.type||"").toUpperCase()+" · "+(item.genre||"No genre");
+   info.append(name,meta);
+   const del=document.createElement("button");del.className="btn danger";del.textContent="Delete";
+   del.addEventListener("click",()=>deleteTitle(item.id,item.title));
+   row.append(info,del);$("catalog").append(row);
+  });
+ }catch(error){$("catalog").textContent=error.message}
+}
+$("connect").addEventListener("click",async()=>{
+ const value=$("token").value.trim();
+ if(!value){status("loginStatus","Enter your admin token.","error");return}
+ $("connect").disabled=true;status("loginStatus","Checking access...");
+ try{
+  const response=await fetch(API+"/api/titles",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+value},body:JSON.stringify({})});
+  if(response.status===401){status("loginStatus","Token rejected. Check the Cloudflare ADMIN_TOKEN secret.","error");return}
+  if(response.status!==400){status("loginStatus","Unexpected response. Check your Worker deployment.","error");return}
+  adminToken=value;
+  $("token").value="";
+  $("loginPanel").classList.add("hidden");$("dashboard").classList.remove("hidden");$("catalogPanel").classList.remove("hidden");
+  await loadCatalog();
+ }catch(error){status("loginStatus","Connection failed: "+error.message,"error")}
+ finally{$("connect").disabled=false}
+});
+$("addForm").addEventListener("submit",async event=>{
+ event.preventDefault();$("addButton").disabled=true;status("formStatus","Adding title...");
+ const payload={title:$("title").value.trim(),type:$("type").value,description:$("description").value.trim(),genre:$("genre").value.trim(),poster_url:$("poster").value.trim(),video_url:$("video").value.trim(),featured:$("featured").checked};
+ try{
+  const response=await fetch(API+"/api/titles",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+adminToken},body:JSON.stringify(payload)});
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.error||"Request failed ("+response.status+")");
+  $("addForm").reset();status("formStatus","Added successfully.","ok");await loadCatalog();
+ }catch(error){status("formStatus",error.message,"error")}
+ finally{$("addButton").disabled=false}
+});
+async function deleteTitle(id,title){
+ if(!confirm('Delete "'+title+'"? This cannot be undone.'))return;
+ try{
+  const response=await fetch(API+"/api/titles/"+id,{method:"DELETE",headers:{"Authorization":"Bearer "+adminToken}});
+  const data=await response.json();if(!response.ok)throw new Error(data.error||"Delete failed");
+  status("catalogStatus","Title deleted.","ok");await loadCatalog();
+ }catch(error){status("catalogStatus",error.message,"error")}
+}
+$("logout").addEventListener("click",()=>{
+ adminToken="";$("dashboard").classList.add("hidden");$("catalogPanel").classList.add("hidden");$("loginPanel").classList.remove("hidden");status("loginStatus","Disconnected.");
+});
+</script>
+</body>
+</html>
